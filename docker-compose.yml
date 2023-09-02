@@ -1,0 +1,52 @@
+version: '3'
+
+x-base_service: &web_service
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./upload:/usr/src/app/upload
+      - ./output:/usr/src/app/output
+      - ./whisper_model:/root/.cache/whisper
+    environment:
+      - WEB_ARGS= --port 5000
+                  --max-size 1073741824
+services:
+  cpu:
+    profiles: ["cpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    image: whisper_timestamped_cpu:latest
+    tty: true
+
+  gpu:
+    profiles: ["gpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: whisper_timestamped:latest
+    tty: true
+
+  web_cpu:
+    <<: *web_service
+    profiles: ["web-cpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile.webcpu
+    image: whisper_timestamped_cpu:latest
+    environment:
+      - CLI_ARGS= --model tiny
+                  --device cpu
+                  --accurate
+
+  web_gpu:
+    <<: *web_service
+    profiles: ["web-gpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile.webgpu
+    image: whisper_timestamped:latest   
+    environment:
+      - CLI_ARGS= --model large
+                  --device cuda:0
+                  --accurate
