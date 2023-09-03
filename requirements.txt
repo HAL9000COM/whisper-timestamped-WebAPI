@@ -3,3 +3,4 @@ dtw-python
 openai-whisper
 flask
 cherrypy
+onnxruntime

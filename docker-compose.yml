@@ -37,6 +37,8 @@ services:
     environment:
       - CLI_ARGS= --model tiny
                   --device cpu
+                  --vad
+                  --detect_disfluencies
                   --accurate
 
   web_gpu:
@@ -49,4 +51,6 @@ services:
     environment:
       - CLI_ARGS= --model large
                   --device cuda:0
+                  --vad
+                  --detect_disfluencies
                   --accurate

@@ -30,6 +30,8 @@ accurate_args = {
 device = "cpu"
 model_name = "large"
 accurate = False
+vad = True
+detect_disfluencies = True
 
 
 @app.route("/transcribe", methods=["POST"])
@@ -51,15 +53,15 @@ def transcribe(task="transcribe"):
     video_prefix = os.path.splitext(os.path.basename(file_path))[0]
 
     out_format = settings.get("format", "srt")
-    vad = settings.get("vad", False)
 
     logging.info(f"Transcribing {file_path} to format {out_format}")
     audio = whisper.load_audio(file_path)
     model = whisper.load_model(model_name, device=device)
 
     args = {}
-    args["vad"] = vad
     args["task"] = task
+    args["vad"] = vad
+    args["detect_disfluencies"] = detect_disfluencies
     if accurate:
         args.update(accurate_args)
     logging.info(f"Transcribing with args {args}")
@@ -91,6 +93,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max-size", help="select the max size to use", default=1024 * 1024 * 1024
     )
+    parser.add_argument("--vad", help="use vad", action="store_true")
+    parser.add_argument(
+        "--detect_disfluencies", help="detect disfluencies", action="store_true"
+    )
     parser.add_argument("--accurate", help="use accurate mode", action="store_true")
     args = parser.parse_args()
     if args.port:
@@ -101,6 +107,10 @@ if __name__ == "__main__":
         model_name = str(args.model)
     if args.device:
         device = str(args.device)
+    if args.vad:
+        vad = True
+    if args.detect_disfluencies:
+        detect_disfluencies = True
     if args.accurate:
         accurate = True
     cherrypy.tree.graft(app, "/")
@@ -113,7 +123,7 @@ if __name__ == "__main__":
         }
     )
     logging.info(
-        f"Starting server on port {port}, max size {max_size}, model {model_name}, device {device}, accurate {accurate}."
+        f"Starting server on port {port}, max size {max_size}, model {model_name}, device {device}, vad {vad}, detect_disfluencies {detect_disfluencies}, accurate {accurate}"
     )
     cherrypy.engine.start()
     cherrypy.engine.block()
