@@ -109,10 +109,16 @@ if __name__ == "__main__":
         device = str(args.device)
     if args.vad:
         vad = True
+    else:
+        vad = False
     if args.detect_disfluencies:
         detect_disfluencies = True
+    else:
+        detect_disfluencies = False
     if args.accurate:
         accurate = True
+    else:
+        accurate = False
     cherrypy.tree.graft(app, "/")
     cherrypy.config.update(
         {
