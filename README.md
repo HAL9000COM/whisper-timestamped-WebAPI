@@ -4,7 +4,7 @@ Build whisper-timestamped docker image that supports WebAPI.
 
 Designed to be used with [AV2Sub](https://github.com/HAL9000COM/AV2Sub).
 
-Tested on Windows WSL2 with cpu.
+Tested on Windows WSL2 with cpu and NVIDIA gpu.
 
 Original project:
 [whisper-timestamped](https://github.com/linto-ai/whisper-timestamped)

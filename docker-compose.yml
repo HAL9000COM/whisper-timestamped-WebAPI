@@ -1,6 +1,6 @@
 version: '3'
 
-x-base_service: &web_service
+x-web_service: &web_service
     ports:
       - "5000:5000"
     volumes:
@@ -10,6 +10,15 @@ x-base_service: &web_service
     environment:
       - WEB_ARGS= --port 5000
                   --max-size 1073741824
+
+x-gpu: &gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 services:
   cpu:
     profiles: ["cpu"]
@@ -20,6 +29,7 @@ services:
     tty: true
 
   gpu:
+    <<: *gpu
     profiles: ["gpu"]
     build:
       context: .
@@ -42,11 +52,11 @@ services:
                   --accurate
 
   web_gpu:
-    <<: *web_service
+    <<: [*web_service,*gpu]
     profiles: ["web-gpu"]
     build:
       context: .
-      dockerfile: Dockerfile.webgpu
+      dockerfile: Dockerfile.web
     image: whisper_timestamped:latest   
     environment:
       - CLI_ARGS= --model large
