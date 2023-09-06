@@ -4,7 +4,7 @@ x-web_service: &web_service
     ports:
       - "5000:5000"
     volumes:
-      - ./upload:/usr/src/app/upload
+      - ./uploads:/usr/src/app/uploads
       - ./output:/usr/src/app/output
       - ./whisper_model:/root/.cache/whisper
     environment:
