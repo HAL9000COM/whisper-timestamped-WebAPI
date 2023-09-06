@@ -56,8 +56,7 @@ def transcribe(task="transcribe"):
 
     logging.info(f"Transcribing {file_path} to format {out_format}")
     audio = whisper.load_audio(file_path)
-    model = whisper.load_model(model_name, device=device)
-
+    
     args = {}
     args["task"] = task
     args["vad"] = vad
@@ -65,7 +64,7 @@ def transcribe(task="transcribe"):
     if accurate:
         args.update(accurate_args)
     logging.info(f"Transcribing with args {args}")
-    result = whisper.transcribe(model, audio, **args)
+    result = whisper.transcribe(app.model, audio, **args)
 
     writer = get_writer(out_format, str(output_directory))
     processed = list(remove_keys(result["segments"], "words"))
@@ -119,6 +118,8 @@ if __name__ == "__main__":
         accurate = True
     else:
         accurate = False
+    logging.info(f"Loading model {model_name} on device {device}")
+    app.model = whisper.load_model(model_name, device=device)
     cherrypy.tree.graft(app, "/")
     cherrypy.config.update(
         {
