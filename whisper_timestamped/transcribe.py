@@ -3,7 +3,7 @@
 __author__ = "Jérôme Louradour"
 __credits__ = ["Jérôme Louradour"]
 __license__ = "GPLv3"
-__version__ = "1.12.20"
+__version__ = "1.13.2"
 
 # Set some environment variables
 import os
@@ -338,7 +338,7 @@ def _transcribe_timestamped_efficient(
 
     logit_filters = get_logit_filters(model, whisper_options)
     language = whisper_options["language"]
-    tokenizer = whisper.tokenizer.get_tokenizer(model.is_multilingual, task=whisper_options["task"], language=language)
+    tokenizer = get_tokenizer(model, task=whisper_options["task"], language=language)
 
     max_sample_len = sample_len or model.dims.n_text_ctx // 2 
     n_ctx = model.dims.n_text_ctx
@@ -975,8 +975,10 @@ def _transcribe_timestamped_naive(
 
     language = norm_language(transcription["language"])
 
-    tokenizer = whisper.tokenizer.get_tokenizer(model.is_multilingual, task=whisper_options["task"], language=language)
+    tokenizer = get_tokenizer(model, task=whisper_options["task"], language=language)
     use_space = should_use_space(language)
+
+    n_mels = model.dims.n_mels if hasattr(model.dims, "n_mels") else 80
 
     attention_weights = [[] for _ in range(min(word_alignement_most_top_layers,len(model.decoder.blocks)))]
 
@@ -1087,7 +1089,7 @@ def _transcribe_timestamped_naive(
             # Extract features on the audio segment
             sub_audio = audio_minimum_padding(audio[start_sample:end_sample])
 
-            mfcc = whisper.log_mel_spectrogram(sub_audio).to(model.device)
+            mfcc = whisper.log_mel_spectrogram(sub_audio, n_mels).to(model.device)
             mfcc = whisper.pad_or_trim(mfcc, N_FRAMES)
             mfcc = mfcc.unsqueeze(0)
 
@@ -1228,7 +1230,7 @@ def print_timestamped(w):
     line = f"[{format_timestamp(w['start'])} --> {format_timestamp(w['end'])}] {w['text']}\n"
     # compared to just `print(line)`, this replaces any character not representable using
     # the system default encoding with an '?', avoiding UnicodeEncodeError.
-    sys.stdout.buffer.write(line.encode(sys.getdefaultencoding(), errors="replace"))
+    sys.stdout.write(line.encode(sys.getdefaultencoding(), errors="replace").decode())
     sys.stdout.flush()
 
 
@@ -1263,6 +1265,18 @@ def get_decoding_options(whisper_options):
         ]
     ])
 
+def get_tokenizer(model, task="transcribe", language="en"):
+    try:
+        return whisper.tokenizer.get_tokenizer(
+            model.is_multilingual,
+            num_languages=model.num_languages if hasattr(model, "num_languages") else 99,
+            task=task, language=language
+        )
+    except TypeError: # Old openai-whisper version
+        return whisper.tokenizer.get_tokenizer(
+            model.is_multilingual,
+            task=task, language=language
+        )
 
 def perform_word_alignment(
     tokens,
