@@ -3,37 +3,44 @@
 Multilingual Automatic Speech Recognition with word-level timestamps and confidence.
 
 * [Description](#description)
-   * [Notes on other approaches](#notes-on-other-approaches)
+  * [Notes on other approaches](#notes-on-other-approaches)
 * [Installation](#installation)
-   * [First installation](#first-installation)
-      * [Additional packages that might be needed](#additional-packages-that-might-be-needed)
-      * [Docker](#docker)
-   * [Light installation for CPU](#light-installation-for-cpu)
-   * [Upgrade to the latest version](#upgrade-to-the-latest-version)
+  * [First installation](#first-installation)
+    * [Additional packages that might be needed](#additional-packages-that-might-be-needed)
+    * [Docker](#docker)
+  * [Light installation for CPU](#light-installation-for-cpu)
+  * [Upgrade to the latest version](#upgrade-to-the-latest-version)
 * [Usage](#usage)
-   * [Python](#python)
-   * [Command line](#command-line)
-   * [Plotting word alignment](#plotting-word-alignment)
-   * [Example output](#example-output)
-   * [Options that may improve results](#options-that-may-improve-results)
+  * [Python](#python)
+  * [Command line](#command-line)
+  * [Plotting word alignment](#plotting-word-alignment)
+  * [Example output](#example-output)
+  * [Options that may improve results](#options-that-may-improve-results)
 * [Acknowlegment](#acknowlegment)
 * [Citations](#citations)
 
 ## Description
+
 [Whisper](https://openai.com/blog/whisper/) is a set of multi-lingual, robust speech recognition models trained by OpenAI that achieve state-of-the-art results in many languages. Whisper models were trained to predict approximate timestamps on speech segments (most of the time with 1-second accuracy), but they cannot originally predict word timestamps. This repository proposes an implementation to **predict word timestamps and provide a more accurate estimation of speech segments when transcribing with Whisper models**.
-<!-- Besides, a confidence score is assigned to each word and each segment (both computed as "exp(mean(log probas))" on the probabilities of subword tokens). -->
+Besides, a confidence score is assigned to each word and each segment.
 
 The approach is based on Dynamic Time Warping (DTW) applied to cross-attention weights, as demonstrated by [this notebook by Jong Wook Kim](https://github.com/openai/whisper/blob/f82bc59f5ea234d4b97fb2860842ed38519f7e65/notebooks/Multilingual_ASR.ipynb). There are some additions to this notebook:
+
 * The start/end estimation is more accurate.
 * Confidence scores are assigned to each word.
 * **If possible (without beam search...)**, no additional inference steps are required to predict word timestamps (word alignment is done on the fly after each speech segment is decoded).
 * Special care has been taken regarding memory usage: `whisper-timestamped` is able to process long files with little additional memory compared to the regular use of the Whisper model.
 
 `whisper-timestamped` is an extension of the [`openai-whisper`](https://pypi.org/project/whisper-openai/) Python package and is meant to be compatible with any version of `openai-whisper`.
+It provides more efficient/accurate word timestamps, along with those additional features:
+
+* Voice Activity Detection (VAD) can be run before applying Whisper model, to avoid hallucinations due to errors in the training data (for instance, predicting "Thanks you for watching!" on pure silence).
+* When the language is not specified, the language probabilities are provided among the outputs.
 
 ### Notes on other approaches
 
 An alternative relevant approach to recovering word-level timestamps involves using wav2vec models that predict characters, as successfully implemented in [whisperX](https://github.com/m-bain/whisperX). However, these approaches have several drawbacks that are not present in approaches based on cross-attention weights such as `whisper_timestamped`. These drawbacks include:
+
 * The need to find one wav2vec model per language to support, which does not scale well with the multi-lingual capabilities of Whisper.
 * The need to handle (at least) one additional neural network (wav2vec model), which consumes memory.
 * The need to normalize characters in Whisper transcription to match the character set of the wav2vec model. This involves awkward language-dependent conversions, such as converting numbers to words ("2" -> "two"), symbols to words ("%" -> "percent", "€" -> "euro(s)")...
@@ -46,15 +53,18 @@ An alternative approach that does not require an additional model is to look at 
 ### First installation
 
 Requirements:
+
 * `python3` (version higher or equal to 3.7, at least 3.9 is recommended)
 * `ffmpeg` (see instructions for installation on the [whisper repository](https://github.com/openai/whisper))
 
 You can install `whisper-timestamped` either by using pip:
+
 ```bash
 pip3 install git+https://github.com/linto-ai/whisper-timestamped
 ```
 
 or by cloning this repository and running installation:
+
 ```bash
 git clone https://github.com/linto-ai/whisper-timestamped
 cd whisper-timestamped/
@@ -64,16 +74,19 @@ python3 setup.py install
 #### Additional packages that might be needed
 
 If you want to plot alignment between audio timestamps and words (as in [this section](#plotting-word-alignment)), you also need matplotlib:
+
 ```bash
 pip3 install matplotlib
 ```
 
 If you want to use VAD option (Voice Activity Detection before running Whisper model), you also need torchaudio and onnxruntime:
+
 ```bash
 pip3 install onnxruntime torchaudio
 ```
 
 If you want to use finetuned Whisper models from the Hugging Face Hub, you also need transformers:
+
 ```bash
 pip3 install transformers
 ```
@@ -81,6 +94,7 @@ pip3 install transformers
 #### Docker
 
 A docker image of about 9GB can be built using:
+
 ```bash
 git clone https://github.com/linto-ai/whisper-timestamped
 cd whisper-timestamped/
@@ -90,6 +104,7 @@ docker build -t whisper_timestamped:latest .
 ### Light installation for CPU
 
 If you don't have a GPU (or don't want to use it), then you don't need to install the CUDA dependencies. You should then just install a light version of torch **before** installing whisper-timestamped, for instance as follows:
+
 ```bash
 pip3 install \
      torch==1.13.1+cpu \
@@ -98,6 +113,7 @@ pip3 install \
 ```
 
 A specific docker image of about 3.5GB can also be built using:
+
 ```bash
 git clone https://github.com/linto-ai/whisper-timestamped
 cd whisper-timestamped/
@@ -107,11 +123,13 @@ docker build -t whisper_timestamped_cpu:latest -f Dockerfile.cpu .
 ### Upgrade to the latest version
 
 When using pip, the library can be updated to the latest version using:
+
 ```
 pip3 install --upgrade --no-deps --force-reinstall git+https://github.com/linto-ai/whisper-timestamped
 ```
 
 A specific version of `openai-whisper` can be used by running, for example:
+
 ```bash
 pip3 install openai-whisper==20230124
 ```
@@ -121,10 +139,12 @@ pip3 install openai-whisper==20230124
 ### Python
 
 In Python, you can use the function `whisper_timestamped.transcribe()`, which is similar to the function `whisper.transcribe()`:
+
 ```python
 import whisper_timestamped
 help(whisper_timestamped.transcribe)
 ```
+
 The main difference with `whisper.transcribe()` is that the output will include a key `"words"` for all segments, with the word start and end position. Note that the word will include punctuation. See the example [below](#example-output).
 
 Besides, the default decoding options are different to favour efficient decoding (greedy decoding instead of beam search, and no temperature sampling fallback). To have same default as in `whisper`, use ```beam_size=5, best_of=5, temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0)```.
@@ -132,6 +152,7 @@ Besides, the default decoding options are different to favour efficient decoding
 There are also additional options related to word alignement.
 
 In general, if you import `whisper_timestamped` instead of `whisper` in your Python script and use `transcribe(model, ...)` instead of `model.transcribe(...)`, it should do the job:
+
 ```
 import whisper_timestamped as whisper
 
@@ -146,6 +167,7 @@ print(json.dumps(result, indent = 2, ensure_ascii = False))
 ```
 
 Note that you can use a finetuned Whisper model from HuggingFace or a local folder by using the `load_model` method of `whisper_timestamped`. For instance, if you want to use [whisper-large-v2-nob](https://huggingface.co/NbAiLab/whisper-large-v2-nob), you can simply do the following:
+
 ```
 import whisper_timestamped as whisper
 
@@ -157,11 +179,13 @@ model = whisper.load_model("NbAiLab/whisper-large-v2-nob", device="cpu")
 ### Command line
 
 You can also use `whisper_timestamped` on the command line, similarly to `whisper`. See help with:
+
 ```bash
 whisper_timestamped --help
 ```
 
 The main differences with `whisper` CLI are:
+
 * Output files:
   * The output JSON contains word timestamps and confidence scores. See example [below](#example-output).
   * There is an additional CSV output format.
@@ -179,11 +203,13 @@ The main differences with `whisper` CLI are:
   * `--punctuations_with_words` to decide whether punctuation marks should be included or not with preceding words.
 
 An example command to process several files using the `tiny` model and output the results in the current folder, as would be done by default with whisper, is as follows:
+
 ```
 whisper_timestamped audio1.flac audio2.mp3 audio3.wav --model tiny --output_dir .
 ```
 
 Note that you can use a fine-tuned Whisper model from HuggingFace or a local folder. For instance, if you want to use the [whisper-large-v2-nob](https://huggingface.co/NbAiLab/whisper-large-v2-nob) model, you can simply do the following:
+
 ```
 whisper_timestamped --model NbAiLab/whisper-large-v2-nob <...>
 ```
@@ -201,9 +227,11 @@ Note that you can use the `plot_word_alignment` option of the `whisper_timestamp
 ### Example output
 
 Here is an example output of the `whisper_timestamped.transcribe()` function, which can be viewed by using the CLI:
+
 ```bash
 whisper_timestamped AUDIO_FILE.wav --model tiny --language fr
 ```
+
 ```json
 {
   "text": " Bonjour! Est-ce que vous allez bien?",
@@ -279,6 +307,24 @@ whisper_timestamped AUDIO_FILE.wav --model tiny --language fr
 }
 ```
 
+If the language is not specified (e.g. without option `--language fr` in the CLI) you will find an additional key with the language probabilities:
+
+```json
+{
+  ...
+  "language": "fr",
+  "language_probs": {
+    "en": 0.027954353019595146,
+    "zh": 0.02743500843644142,
+    ...
+    "fr": 0.9196318984031677,
+    ...
+    "su": 3.0119704064190955e-08,
+    "yue": 2.2565967810805887e-05
+  }
+}
+```
+
 ### Options that may improve results
 
 Here are some options that are not enabled by default but might improve results.
@@ -286,11 +332,15 @@ Here are some options that are not enabled by default but might improve results.
 #### Accurate Whisper transcription
 
 As mentioned earlier, some decoding options are disabled by default to offer better efficiency. However, this can impact the quality of the transcription. To run with the options that have the best chance of providing a good transcription, use the following options.
+
 * In Python:
+
 ```python
 results = whisper_timestamped.transcribe(model, audio, beam_size=5, best_of=5, temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0), ...)
 ```
+
 * On the command line:
+
 ```bash
 whisper_timestamped --accurate ...
 ```
@@ -298,11 +348,15 @@ whisper_timestamped --accurate ...
 #### Running Voice Activity Detection (VAD) before sending to Whisper
 
 Whisper models can "hallucinate" text when given a segment without speech. This can be avoided by running VAD and gluing speech segments together before transcribing with the Whisper model. This is possible with `whisper-timestamped`.
+
 * In Python:
+
 ```python
 results = whisper_timestamped.transcribe(model, audio, vad=True, ...)
 ```
+
 * On the command line:
+
 ```bash
 whisper_timestamped --vad True ...
 ```
@@ -310,22 +364,28 @@ whisper_timestamped --vad True ...
 #### Detecting disfluencies
 
 Whisper models tend to remove speech disfluencies (filler words, hesitations, repetitions, etc.). Without precautions, the disfluencies that are not transcribed will affect the timestamp of the following word: the timestamp of the beginning of the word will actually be the timestamp of the beginning of the disfluencies. `whisper-timestamped` can have some heuristics to avoid this.
+
 * In Python:
+
 ```python
 results = whisper_timestamped.transcribe(model, audio, detect_disfluencies=True, ...)
 ```
+
 * On the command line:
+
 ```bash
 whisper_timestamped --detect_disfluencies True ...
 ```
+
 **Important:** Note that when using these options, possible disfluencies will appear in the transcription as a special "`[*]`" word.
 
-
 ## Acknowlegment
+
 * [whisper](https://github.com/openai/whisper): Whisper speech recognition (License MIT).
 * [dtw-python](https://pypi.org/project/dtw-python): Dynamic Time Warping (License GPL v3).
 
 ## Citations
+
 If you use this in your research, please cite the repo:
 
 ```bibtex

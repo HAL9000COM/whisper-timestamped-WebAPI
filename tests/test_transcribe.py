@@ -478,12 +478,13 @@ class TestTranscribeMonolingual(TestHelperCli):
 
     def test_monolingual_small(self):
 
-        self._test_cli_(
-            ["--model", "small.en", "--condition", "True", "--efficient"],
-            "small.en",
-            files=["arabic.mp3"],
-            device_specific=True,
-        )
+        if os.path.exists(self.get_data_path("arabic.mp3", check=False)):
+            self._test_cli_(
+                ["--model", "small.en", "--condition", "True", "--efficient"],
+                "small.en",
+                files=["arabic.mp3"],
+                device_specific=True,
+            )
 
 
 class TestTranscribeWithVad(TestHelperCli):
@@ -513,6 +514,7 @@ class TestTranscribeUnspacedLanguage(TestHelperCli):
             ["--model", "tiny", "--language", "Japanese", "--efficient"],
             "tiny_auto",
             files=["japanese.mp3"],
+            prefix="jp",
             device_specific=True,
         )
 
@@ -528,7 +530,7 @@ class TestTranscribeUnspacedLanguage(TestHelperCli):
             ["--model", "tiny", "--language", "Japanese", "--accurate"],
             "tiny_auto",
             files=["japanese.mp3"],
-            prefix="accurate",
+            prefix="accurate_jp",
             device_specific=True,
         )
 

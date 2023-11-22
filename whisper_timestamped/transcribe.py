@@ -3,7 +3,7 @@
 __author__ = "Jérôme Louradour"
 __credits__ = ["Jérôme Louradour"]
 __license__ = "GPLv3"
-__version__ = "1.13.2"
+__version__ = "1.13.3"
 
 # Set some environment variables
 import os
@@ -14,6 +14,13 @@ os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID' # GPU in the right order
 import whisper
 import torch
 import torch.nn.functional as F
+
+from importlib.util import find_spec
+if find_spec("intel_extension_for_pytorch") is not None:
+    try:
+        import intel_extension_for_pytorch
+    except ImportError:
+        pass
 
 # For alignment
 import numpy as np
@@ -211,6 +218,8 @@ def transcribe_timestamped(
         naive_approach = True
 
     # Input options
+    if isinstance(model, str):
+        model = load_model(model)
     if fp16 is None:
         fp16 = model.device != torch.device("cpu")
 
@@ -367,6 +376,7 @@ def _transcribe_timestamped_efficient(
     mfcc = None                     # MFCC features for the current 30 sec chunk
     new_mfcc = None                 #
     num_inference_steps = 0         # number of inference steps performed so far (for debugging only)
+    language_probs = None           # language detection probabilities
 
     def is_sot(curr_tokens):
         return curr_tokens is None or len(curr_tokens) > 1 or curr_tokens[0] == tokenizer.sot
@@ -799,17 +809,25 @@ def _transcribe_timestamped_efficient(
 
     embedding_weights = None 
     def hook_output_logits(layer, ins, outs):
-        nonlocal no_speech_prob, chunk_logprobs, segment_tokens, chunk_tokens, chunk_tokens_nosot, last_chunk_token, embedding_weights, has_started
+        nonlocal no_speech_prob, chunk_logprobs, segment_tokens, chunk_tokens, chunk_tokens_nosot, last_chunk_token, embedding_weights, has_started, language, language_probs
         
         if embedding_weights is None:
             embedding_weights = torch.transpose(model.decoder.token_embedding.weight, 0, 1).to(outs[0].dtype)
 
         # Get the probability of silence
-        if sot_index is not None:
+        if sot_index is not None and no_speech_prob is None:
             logits = (outs[0][sot_index,:] @ embedding_weights).float()
             logits = logits.softmax(dim=-1)
             no_speech_prob = logits[tokenizer.no_speech].item()
-        
+
+        # Get language probabilities
+        if language is None and sot_index is not None and model.is_multilingual:
+            index_start = tokenizer.sot + 1
+            index_end = index_start + len(tokenizer.all_language_tokens)
+            logits = (outs[0][sot_index,:] @ embedding_weights).float()
+            language_probs = logits[index_start:index_end].softmax(dim=-1)
+            language_probs = dict(zip(whisper.tokenizer.LANGUAGES, language_probs.tolist()))
+
         # Get the log-probabilities of tokens (we don't know yet which one will be chosen)
         if has_started:
             logits = (outs[0][-1:,:] @ embedding_weights).float()
@@ -823,7 +841,7 @@ def _transcribe_timestamped_efficient(
                 last_chunk_token = torch.argmax(logits).item()
             else:
                 last_chunk_token = None
-                
+
     try:
 
         # Add hooks to the model, to get tokens and attention weights on the fly
@@ -935,6 +953,9 @@ def _transcribe_timestamped_efficient(
 
         words.extend(timestamped_words)
 
+    if language_probs:
+        transcription["language_probs"] = language_probs
+
     return transcription, words
 
 def _transcribe_timestamped_naive(
@@ -966,7 +987,33 @@ def _transcribe_timestamped_naive(
         # Reproduce whisper verbose (1/2)
         print("Detecting language using up to the first 30 seconds. Use `--language` to specify the language")
 
-    transcription = model.transcribe(audio, **whisper_options)
+    tokenizer = get_tokenizer(model, task=whisper_options["task"], language=language)
+
+    language_probs = None
+    def hook_output_logits(layer, ins, outs):
+        nonlocal language_probs, tokenizer
+        
+        # Get language probabilities
+        if language_probs is None:
+            if outs.shape[1] == 1:
+                embedding_weights = torch.transpose(model.decoder.token_embedding.weight, 0, 1).to(outs[0].dtype)
+                index_start = tokenizer.sot + 1
+                index_end = index_start + len(tokenizer.all_language_tokens)
+                logits = (outs[0][0,:] @ embedding_weights).float()
+                language_probs = logits[index_start:index_end].softmax(dim=-1)
+                language_probs = dict(zip(whisper.tokenizer.LANGUAGES, language_probs.tolist()))
+            else:
+                language_probs = False
+
+    all_hooks = []
+    if model.is_multilingual:
+        all_hooks.append(model.decoder.ln.register_forward_hook(hook_output_logits))
+
+    try:
+        transcription = model.transcribe(audio, **whisper_options)
+    finally:
+        for hook in all_hooks:
+            hook.remove()
 
     if verbose and language is None and not whisper_options["verbose"]:
         # Reproduce whisper verbose (2/2)
@@ -974,8 +1021,6 @@ def _transcribe_timestamped_naive(
         sys.stdout.flush()
 
     language = norm_language(transcription["language"])
-
-    tokenizer = get_tokenizer(model, task=whisper_options["task"], language=language)
     use_space = should_use_space(language)
 
     n_mels = model.dims.n_mels if hasattr(model.dims, "n_mels") else 80
@@ -1201,6 +1246,9 @@ def _transcribe_timestamped_naive(
         for hook in all_hooks:
             hook.remove()
 
+    if language_probs:
+        transcription["language_probs"] = language_probs
+
     return (transcription, words)
 
 def get_audio_tensor(audio, device="cpu"):
@@ -1219,7 +1267,7 @@ def audio_minimum_padding(audio):
 
 
 def should_use_space(language):
-    return norm_language(language) not in ["zh", "ja", "th", "lo", "my"]
+    return norm_language(language) not in ["zh", "ja", "th", "lo", "my", "yue"]
 
 def norm_language(language):
     if language is None:
@@ -1817,9 +1865,12 @@ def remove_non_speech(audio,
     if plot:
         import matplotlib.pyplot as plt
         plt.figure()
-        plt.plot(audio)
-        for s,e in segments:
-            plt.axvspan(s, e, color='red', alpha=0.1)
+        max_num_samples = 10000
+        step = (audio.shape[-1] // max_num_samples) + 1
+        times = [i*step/SAMPLE_RATE for i in range((audio.shape[-1]-1) // step + 1)]
+        plt.plot(times, audio[::step])
+        for s, e in segments:
+            plt.axvspan(s/SAMPLE_RATE, e/SAMPLE_RATE, color='red', alpha=0.1)
         if isinstance(plot, str):
             plt.savefig(f"{plot}.VAD.jpg", bbox_inches='tight', pad_inches=0)
         else:
@@ -2001,8 +2052,17 @@ def write_csv(transcript, file, sep = ",", text_first=True, format_timestamps=No
 # CUDA initialization may fail on old GPU card
 def force_cudnn_initialization(device=None, s=32):
     if device is None:
-        device = torch.device('cuda')
+        device = get_default_device()
     torch.nn.functional.conv2d(torch.zeros(s, s, s, s, device=device), torch.zeros(s, s, s, s, device=device))
+
+def get_default_device():
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif find_spec('torch.xpu') is not None and torch.xpu.is_available():
+        device = "xpu"
+    else:
+        device = "cpu"
+    return device
 
 # base85-encoded (n_layers, n_heads) boolean arrays indicating the cross-attention heads that are
 # highly correlated to the word-level timing, i.e. the alignment between audio and text tokens.
@@ -2197,7 +2257,7 @@ def cli():
     parser.add_argument('audio', help="audio file(s) to transcribe", nargs='+')
     parser.add_argument('--model', help=f"name of the Whisper model to use. Examples: {', '.join(whisper.available_models())}", default="small")
     parser.add_argument("--model_dir", default=None, help="the path to save model files; uses ~/.cache/whisper by default", type=str)
-    parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu", help="device to use for PyTorch inference")
+    parser.add_argument("--device", default=get_default_device(), help="device to use for PyTorch inference")
     parser.add_argument("--output_dir", "-o", default=None, help="directory to save the outputs", type=str)
     valid_formats = ["txt", "vtt", "srt", "tsv", "csv", "json"]
     def str2output_formats(string):
@@ -2309,10 +2369,6 @@ def cli():
     args["compute_word_confidence"] = args.pop("compute_confidence")
     args["trust_whisper_timestamps"] = not args.pop("recompute_all_timestamps")
 
-    # Quick early check
-    for audio_path in audio_files:
-        assert os.path.isfile(audio_path), f"File {audio_path} does not exist"
-
     for audio_path in audio_files:
 
         outname = os.path.join(output_dir, os.path.basename(audio_path)) if output_dir else None
@@ -2375,10 +2431,11 @@ def filtered_keys(result, keys = [
     "language",
     "start",
     "end",
-    "confidence"
+    "confidence",
+    "language_probs",
 ]):
     if isinstance(result, dict):
-        return {k: filtered_keys(v, keys) for k, v in result.items() if k in keys}
+        return {k: (filtered_keys(v, keys) if k not in ["language_probs"] else v) for k, v in result.items() if k in keys}
     if isinstance(result, list):
         return [filtered_keys(v, keys) for v in result]
     if isinstance(result, float):
